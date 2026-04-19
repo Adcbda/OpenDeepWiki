@@ -1,4 +1,5 @@
-import type { RepoHeading } from "@/types/repository";
+import type { TOCItemType } from "fumadocs-core/toc";
+import GithubSlugger from "github-slugger";
 
 function normalizeHeadingText(text: string) {
   return text
@@ -9,29 +10,10 @@ function normalizeHeadingText(text: string) {
     .trim();
 }
 
-export function slugifyHeading(text: string) {
-  return normalizeHeadingText(text)
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-export function createSlugger() {
-  const counts = new Map<string, number>();
-  return (text: string) => {
-    const base = slugifyHeading(text) || "section";
-    const current = counts.get(base) ?? 0;
-    counts.set(base, current + 1);
-    return current === 0 ? base : `${base}-${current}`;
-  };
-}
-
-export function extractHeadings(markdown: string, maxLevel = 3): RepoHeading[] {
+export function extractHeadings(markdown: string, maxLevel = 3): TOCItemType[] {
   const lines = markdown.split(/\r?\n/);
-  const headings: RepoHeading[] = [];
-  const slugger = createSlugger();
+  const headings: TOCItemType[] = [];
+  const slugger = new GithubSlugger();
   let inCodeBlock = false;
 
   for (const line of lines) {
@@ -61,9 +43,9 @@ export function extractHeadings(markdown: string, maxLevel = 3): RepoHeading[] {
     }
 
     headings.push({
-      id: slugger(text),
-      text,
-      level,
+      title: text,
+      url: `#${slugger.slug(text)}`,
+      depth: level,
     });
   }
 
