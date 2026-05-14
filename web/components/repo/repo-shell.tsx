@@ -1,14 +1,16 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
-import type { RepoTreeNode, RepoBranchesResponse } from "@/types/repository";
-import { BranchLanguageSelector } from "./branch-language-selector";
-import { fetchRepoTree, fetchRepoBranches } from "@/lib/repository-api";
-import { Network, Download } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { Download, Network, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import type { RepoBranchesResponse, RepoTreeNode } from "@/types/repository";
 import { ChatAssistant, buildCatalogMenu } from "@/components/chat";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { fetchRepoBranches, fetchRepoTree } from "@/lib/repository-api";
 import { buildRepoBasePath, buildRepoDocPath, buildRepoMindMapPath } from "@/lib/repo-route";
+import { cn } from "@/lib/utils";
+import { BranchLanguageSelector } from "./branch-language-selector";
 
 const repoUiText = {
   zh: {
@@ -16,12 +18,16 @@ const repoUiText = {
     mindMap: "项目架构",
     exportDocs: "导出文档",
     exporting: "导出中...",
+    collapseSidebar: "收起目录",
+    expandSidebar: "展开目录",
   },
   en: {
     wikiTitle: "Repository Wiki",
     mindMap: "Project Architecture",
     exportDocs: "Export Docs",
     exporting: "Exporting...",
+    collapseSidebar: "Collapse catalog",
+    expandSidebar: "Expand catalog",
   },
 } as const;
 
@@ -63,16 +69,16 @@ function SidebarTree({
           <li key={node.slug}>
             <Link
               href={href}
-              className={[
+              className={cn(
                 "block rounded-md px-3 py-2 text-sm transition-colors",
                 isActive
                   ? "bg-primary text-primary-foreground"
-                  : "text-foreground/80 hover:bg-muted hover:text-foreground",
-              ].join(" ")}
+                  : "text-foreground/80 hover:bg-muted hover:text-foreground"
+              )}
             >
               {node.title}
             </Link>
-            {node.children && node.children.length > 0 && (
+            {node.children?.length > 0 && (
               <SidebarTree
                 nodes={node.children}
                 owner={owner}
@@ -89,10 +95,10 @@ function SidebarTree({
   );
 }
 
-export function RepoShell({ 
-  owner, 
-  repo, 
-  initialNodes, 
+export function RepoShell({
+  owner,
+  repo,
+  initialNodes,
   children,
   initialBranches,
   initialBranch,
@@ -104,18 +110,17 @@ export function RepoShell({
   const urlBranch = searchParams.get("branch");
   const urlLang = searchParams.get("lang");
   const repoBasePath = buildRepoBasePath(owner, repo);
-  
+
   const [nodes, setNodes] = useState<RepoTreeNode[]>(initialNodes);
   const [branches, setBranches] = useState<RepoBranchesResponse | undefined>(initialBranches);
   const [currentBranch, setCurrentBranch] = useState(initialBranch || "");
   const [currentLanguage, setCurrentLanguage] = useState(initialLanguage || "");
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const copy = repoUiText[uiLocale];
 
-  // 从pathname提取当前文档路径
   const currentDocPath = React.useMemo(() => {
-    // pathname格式: /owner/repo/slug 或 /owner/repo/path/to/doc
     const encodedPrefix = `${repoBasePath}/`;
     if (pathname.startsWith(encodedPrefix)) {
       return pathname.slice(encodedPrefix.length);
@@ -125,37 +130,36 @@ export function RepoShell({
     if (pathname.startsWith(rawPrefix)) {
       return pathname.slice(rawPrefix.length);
     }
+
     return "";
   }, [pathname, owner, repo, repoBasePath]);
 
-  // 当 URL 参数变化时，重新获取数据
   useEffect(() => {
     const branch = urlBranch || undefined;
     const lang = urlLang || undefined;
-    
-    // 如果没有指定参数，使用初始值
+
     if (!branch && !lang) {
       return;
     }
 
-    // 如果参数和当前状态相同，不需要重新获取
     if (branch === currentBranch && lang === currentLanguage) {
       return;
     }
 
-    const fetchData = async () => {
+    async function fetchData() {
       setIsLoading(true);
       try {
         const [treeData, branchesData] = await Promise.all([
           fetchRepoTree(owner, repo, branch, lang),
           fetchRepoBranches(owner, repo),
         ]);
-        
+
         if (treeData.nodes.length > 0) {
           setNodes(treeData.nodes);
           setCurrentBranch(treeData.currentBranch || "");
           setCurrentLanguage(treeData.currentLanguage || "");
         }
+
         if (branchesData) {
           setBranches(branchesData);
         }
@@ -164,37 +168,37 @@ export function RepoShell({
       } finally {
         setIsLoading(false);
       }
-    };
+    }
 
     fetchData();
   }, [urlBranch, urlLang, owner, repo, currentBranch, currentLanguage]);
 
-  // 构建查询字符串 - 优先使用 URL 参数，确保链接始终保持当前 URL 的参数
   const queryString = searchParams.toString();
-
-  // 构建思维导图链接
-  const mindMapUrl = queryString 
+  const mindMapUrl = queryString
     ? `${buildRepoMindMapPath(owner, repo)}?${queryString}`
     : buildRepoMindMapPath(owner, repo);
+  const title = `${owner}/${repo}`;
 
-  // 导出功能处理
-  const handleExport = async () => {
-    if (isExporting) return;
-    
+  async function handleExport() {
+    if (isExporting) {
+      return;
+    }
+
     setIsExporting(true);
     try {
       const params = new URLSearchParams();
       if (currentBranch) params.set("branch", currentBranch);
       if (currentLanguage) params.set("lang", currentLanguage);
-      
-      const exportUrl = `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/export${params.toString() ? `?${params.toString()}` : ""}`;
-      
+
+      const exportUrl = `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/export${
+        params.toString() ? `?${params.toString()}` : ""
+      }`;
+
       const response = await fetch(exportUrl);
       if (!response.ok) {
         throw new Error(copy.exportDocs);
       }
-      
-      // 获取文件名
+
       const contentDisposition = response.headers.get("content-disposition");
       let fileName = `${owner}-${repo}-${currentBranch || "main"}-${currentLanguage || "zh"}.zip`;
       if (contentDisposition) {
@@ -203,28 +207,23 @@ export function RepoShell({
           fileName = fileNameMatch[1].replace(/['"]/g, "");
         }
       }
-      
-      // 下载文件
+
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
       window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      document.body.removeChild(anchor);
     } catch (error) {
       console.error("Export failed:", error);
-      // 可以在这里添加错误提示
     } finally {
       setIsExporting(false);
     }
-  };
+  }
 
-  const title = `${owner}/${repo}`;
-
-  // 构建侧边栏顶部的选择器和操作按钮
   const sidebarBanner = (
     <div className="space-y-3">
       {branches && (
@@ -239,20 +238,21 @@ export function RepoShell({
       <div className="space-y-2">
         <Link
           href={mindMapUrl}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300 hover:bg-blue-500/20 transition-colors"
+          className="flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-blue-700 transition-colors hover:bg-blue-500/20 dark:text-blue-300"
         >
           <Network className="h-4 w-4" />
-          <span className="font-medium text-sm">{copy.mindMap}</span>
+          <span className="text-sm font-medium">{copy.mindMap}</span>
         </Link>
         <button
+          type="button"
           onClick={handleExport}
           disabled={isExporting}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/30 text-green-700 dark:text-green-300 hover:bg-green-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full"
+          className="flex w-full items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-green-700 transition-colors hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-green-300"
         >
           <Download className="h-4 w-4" />
-            <span className="font-medium text-sm">
-              {isExporting ? copy.exporting : copy.exportDocs}
-            </span>
+          <span className="text-sm font-medium">
+            {isExporting ? copy.exporting : copy.exportDocs}
+          </span>
         </button>
       </div>
     </div>
@@ -270,26 +270,68 @@ export function RepoShell({
       </div>
 
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 lg:flex-row lg:px-6">
-        <aside className="w-full shrink-0 lg:sticky lg:top-6 lg:w-80 lg:self-start">
-          <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm">
-            {sidebarBanner}
-            <div className="mt-4 border-t border-border/70 pt-4">
-              <SidebarTree
-                nodes={nodes}
-                owner={owner}
-                repo={repo}
-                queryString={queryString}
-                currentPath={currentDocPath}
-              />
+        <aside
+          className={cn(
+            "w-full shrink-0 transition-[width] duration-300 lg:sticky lg:top-6 lg:self-start",
+            isSidebarCollapsed ? "lg:w-16" : "lg:w-80"
+          )}
+        >
+          <div className="flex max-h-[calc(100vh-3rem)] min-h-0 flex-col rounded-lg border border-border/70 bg-card p-3 shadow-sm">
+            <div className="flex items-center justify-between gap-2">
+              <div className={cn("min-w-0", isSidebarCollapsed && "lg:hidden")}>
+                <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{copy.wikiTitle}</div>
+                <div className="truncate text-sm font-semibold">{title}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSidebarCollapsed((value) => !value)}
+                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:inline-flex"
+                title={isSidebarCollapsed ? copy.expandSidebar : copy.collapseSidebar}
+                aria-label={isSidebarCollapsed ? copy.expandSidebar : copy.collapseSidebar}
+              >
+                {isSidebarCollapsed ? (
+                  <PanelLeftOpen className="h-4 w-4" />
+                ) : (
+                  <PanelLeftClose className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+
+            {isSidebarCollapsed && (
+              <div className="mt-3 hidden flex-col items-center gap-2 border-t border-border/70 pt-3 lg:flex">
+                <button
+                  type="button"
+                  onClick={() => setIsSidebarCollapsed(false)}
+                  className="flex h-10 w-10 items-center justify-center rounded-md bg-muted text-sm font-semibold text-foreground transition-colors hover:bg-accent"
+                  title={copy.expandSidebar}
+                >
+                  {repo.slice(0, 1).toUpperCase()}
+                </button>
+              </div>
+            )}
+
+            <div className={cn("mt-4 flex min-h-0 flex-1 flex-col", isSidebarCollapsed && "lg:hidden")}>
+              {sidebarBanner}
+              <div className="mt-4 min-h-0 flex-1 border-t border-border/70 pt-4">
+                <ScrollArea className="h-80 pr-3 lg:h-[calc(100vh-22rem)]">
+                  <SidebarTree
+                    nodes={nodes}
+                    owner={owner}
+                    repo={repo}
+                    queryString={queryString}
+                    currentPath={currentDocPath}
+                  />
+                </ScrollArea>
+              </div>
             </div>
           </div>
         </aside>
 
         <main className="min-w-0 flex-1">
-          <div className="rounded-xl border border-border/70 bg-card p-4 shadow-sm sm:p-6">
+          <div className="rounded-lg border border-border/70 bg-card p-4 shadow-sm sm:p-6">
             {isLoading ? (
               <div className="flex items-center justify-center py-20">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
               </div>
             ) : (
               children
@@ -298,7 +340,6 @@ export function RepoShell({
         </main>
       </div>
 
-      {/* 文档对话助手悬浮球 */}
       <ChatAssistant
         context={{
           owner,
